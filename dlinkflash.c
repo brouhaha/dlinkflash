@@ -18,7 +18,15 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>. 
  */
- 
+
+/*
+ * 2014-11-07 Eric Smith <spacewar@gmail.com>
+ *	use ssize_t where appropriate (result of send, recv), so that
+ *	comparisons for less than zero will work
+ *	use "z" modifier in format strings for size_t, ssize_t
+ *	eliminate unused variables
+ */
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -31,6 +39,7 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
  
 void build_post_bin(uint8_t **post, size_t *post_len, uint8_t *newdata, size_t datalen) {
     uint8_t *newpost = NULL;
@@ -49,9 +58,7 @@ void build_post_bin(uint8_t **post, size_t *post_len, uint8_t *newdata, size_t d
 }
  
 void build_post(uint8_t **post, size_t *post_len, char *newchar, size_t *content_len) {
-    uint8_t *newpost = NULL;
-    size_t nlen;
-    build_post_bin(post, post_len, newchar, strlen(newchar));
+    build_post_bin(post, post_len, (uint8_t *) newchar, strlen(newchar));
     if (content_len) {
         *content_len += strlen(newchar);
     }
@@ -88,7 +95,7 @@ int open_socket(void) {
 }
  
 void send_get(int *sock, uint8_t *get, size_t getlen, uint8_t *post, int debug) {
-    size_t socksent = 0;
+    ssize_t socksent = 0;
     size_t curpos = 0;
     *sock = open_socket();
     if (*sock < 0) {
@@ -102,7 +109,7 @@ void send_get(int *sock, uint8_t *get, size_t getlen, uint8_t *post, int debug) 
         if ((getlen - curpos) >= 512) {
 	    socksent = send(*sock, get + curpos, 512, 0);
             if (debug)
-                fprintf(stderr, "Sent %d bytes\n", socksent);
+                fprintf(stderr, "Sent %zd bytes\n", socksent);
 	    if (socksent < 0) {
 	        perror("send_get");
 		close(*sock);
@@ -114,7 +121,7 @@ void send_get(int *sock, uint8_t *get, size_t getlen, uint8_t *post, int debug) 
 	} else {
 	    socksent = send(*sock, get + curpos, getlen - curpos, 0);
             if (debug)
-                fprintf(stderr, "Sent %d bytes\n", socksent);
+                fprintf(stderr, "Sent %zd bytes\n", socksent);
 	    if (socksent < 0) {
 	        perror("send_get");
 		close(*sock);
@@ -125,7 +132,7 @@ void send_get(int *sock, uint8_t *get, size_t getlen, uint8_t *post, int debug) 
             }
         }
         curpos += socksent;
-        printf("\r%d/%d Bytes written: GET %g%% complete                          ", curpos, getlen, ((float)curpos / (float)getlen) * (float)100);
+        printf("\r%zd/%zd Bytes written: GET %g%% complete                          ", curpos, getlen, ((float)curpos / (float)getlen) * (float)100);
 	fflush(stdout);
     }
     printf("\nFinished sending GET. Waiting for response.\n");
@@ -168,7 +175,7 @@ int main(int argc, char *argv[]) {
 	exit(1);
     }
  
-    size_t len = 0;
+    ssize_t len = 0;
     uint8_t buf[1024];
     uint8_t *newfw = NULL;
     int sock;
@@ -194,7 +201,7 @@ int main(int argc, char *argv[]) {
         }
     } while (len > 0);
     close(firmwarefd);
-    printf("Firmware %u bytes long\n", firmwarelen);
+    printf("Firmware %zu bytes long\n", firmwarelen);
  
     build_post(&content, &contentlen, "---------------------------7de1fe13304\r\n", NULL);    
     nonnllen += 2;
@@ -206,7 +213,7 @@ int main(int argc, char *argv[]) {
     nonnllen += 4;
  
     /* IE6 off-by-one content-length error? */
-    sprintf(contentlenstr, "%d\r\n", nonnllen + firmwarelen + 1);
+    sprintf(contentlenstr, "%zd\r\n", nonnllen + firmwarelen + 1);
  
     build_post(&get, &getlen, "GET / HTTP/1.1\r\n", NULL);
     build_post(&get, &getlen, "Accept: image/gif, image/x-xbitmap, image/jpeg, image/pjpeg, */*\r\n", NULL);
@@ -237,10 +244,8 @@ int main(int argc, char *argv[]) {
     printf("Initiating GET so that router is in state to receive POST....");
     fflush(stdout);
     send_get(&sock, get, getlen, post, debug);
-    int gotlen = 0;
     char recvbuf[1024];
     int recvlen = recv(sock, &recvbuf[0], 512, MSG_WAITALL);
-    int newrecvlen;
     if (debug)
         fprintf(stderr, "Got %d bytes\n", recvlen);
     if (debug) {
@@ -274,13 +279,13 @@ int main(int argc, char *argv[]) {
         free(get);
         free(post);
     }
-    size_t socksent = 0;
+    ssize_t socksent = 0;
     curpos = 0;
     while (curpos < postlen) {
         if ((postlen - curpos) >= 512) {
 	    socksent = send(sock, post + curpos, 512, 0);
             if (debug)
-                fprintf(stderr, "Sent %d bytes\n", socksent);
+                fprintf(stderr, "Sent %zd bytes\n", socksent);
 	    if (socksent < 0) {
 	        perror(argv[1]);
 		close(sock);
@@ -290,7 +295,7 @@ int main(int argc, char *argv[]) {
 	} else {
 	    socksent = send(sock, post + curpos, postlen - curpos, 0);
             if (debug)
-                fprintf(stderr, "Sent %d bytes\n", socksent);
+                fprintf(stderr, "Sent %zd bytes\n", socksent);
 	    if (socksent < 0) {
 	        perror(argv[1]);
     		free(get);
@@ -300,7 +305,7 @@ int main(int argc, char *argv[]) {
             }
         }
         curpos += socksent;
-        printf("\r%d/%d Bytes written: Upload %g%% complete        ", curpos, postlen, ((float)curpos / (float)postlen) * (float)100);
+        printf("\r%zd/%zd Bytes written: Upload %g%% complete        ", curpos, postlen, ((float)curpos / (float)postlen) * (float)100);
 	fflush(stdout);
     }
     printf("\nFinished sending post. Waiting for response.\n");
@@ -336,7 +341,7 @@ int main(int argc, char *argv[]) {
           }
           recvlen = recv(sock, &recvbuf[0], 512, MSG_WAITALL);
           if (debug) {
- 	      fprintf(stderr, "Got %d data\n", newrecvlen);
+ 	      fprintf(stderr, "Got %d data\n", recvlen);
               if (recvlen > 0)
                  fprintf(stderr, "%s", &recvbuf[0]);
           }
